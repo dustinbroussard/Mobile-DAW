@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
 import { Play, Pause, Square, Circle, RotateCcw, Settings, Music, Disc } from 'lucide-react';
-import { TransportState, ViewMode } from '../types/daw';
+import {
+  ProjectState,
+  ViewMode,
+  formatBarBeatTick,
+  calculatePlaybackSeconds,
+  formatTimecode,
+} from '../types/daw';
 
 interface TopBarProps {
-  projectName: string;
+  project: ProjectState;
   onUpdateProjectName: (name: string) => void;
-  transport: TransportState;
   onTogglePlay: () => void;
   onToggleRecord: () => void;
   onStopTransport: () => void;
@@ -18,9 +23,8 @@ interface TopBarProps {
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
-  projectName,
+  project,
   onUpdateProjectName,
-  transport,
   onTogglePlay,
   onToggleRecord,
   onStopTransport,
@@ -30,37 +34,40 @@ export const TopBar: React.FC<TopBarProps> = ({
 }) => {
   const [isEditingName, setIsEditingName] = useState(false);
 
-  // Format time display (Bar : Beat : Tick)
-  const formatBarTime = () => {
-    const bar = String(transport.currentBar).padStart(3, '0');
-    const beat = String(transport.currentBeat).padStart(2, '0');
-    const tick = String(transport.currentTick).padStart(2, '0');
-    return `${bar}:${beat}:${tick}`;
-  };
+  const { transport, bpm, timeSignatureNumerator, name } = project;
 
-  // Estimate clock time in seconds based on BPM & time signature
-  const getSecondsTime = () => {
-    const totalBeats = (transport.currentBar - 1) * transport.timeSignatureNumerator + (transport.currentBeat - 1);
-    const seconds = (totalBeats * 60) / transport.bpm;
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    const tenths = Math.floor(((seconds % 60) - secs) * 10);
-    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${tenths}`;
-  };
+  // Format position & timecode via consolidated DAW timing utilities
+  const formattedPosition = formatBarBeatTick(
+    transport.currentBar,
+    transport.currentBeat,
+    transport.currentTick
+  );
+
+  const elapsedSeconds = calculatePlaybackSeconds(
+    transport.currentBar,
+    transport.currentBeat,
+    transport.currentTick,
+    bpm,
+    timeSignatureNumerator
+  );
+  const formattedTimecode = formatTimecode(elapsedSeconds);
 
   return (
     <header className="bg-[#121212] border-b border-[#222222] text-white px-2 py-1.5 flex items-center justify-between select-none min-h-[48px] z-30">
       {/* Left: Project Branding & Name */}
       <div className="flex items-center gap-2 max-w-[200px] sm:max-w-[280px]">
         <div className="w-7 h-7 rounded bg-black border border-[#222222] flex items-center justify-center shrink-0">
-          <Disc className="w-4 h-4 text-[#00FF41] animate-spin" style={{ animationDuration: transport.isPlaying ? '3s' : '0s' }} />
+          <Disc
+            className="w-4 h-4 text-[#00FF41] animate-spin"
+            style={{ animationDuration: transport.isPlaying ? '3s' : '0s' }}
+          />
         </div>
-        
+
         <div className="flex flex-col min-w-0">
           {isEditingName ? (
             <input
               type="text"
-              value={projectName}
+              value={name}
               onChange={(e) => onUpdateProjectName(e.target.value)}
               onBlur={() => setIsEditingName(false)}
               onKeyDown={(e) => e.key === 'Enter' && setIsEditingName(false)}
@@ -73,10 +80,12 @@ export const TopBar: React.FC<TopBarProps> = ({
               className="text-xs font-semibold text-left truncate hover:text-[#00E5FF] transition-colors"
               title="Click to rename project"
             >
-              {projectName}
+              {name}
             </button>
           )}
-          <span className="text-[10px] text-[#555555] font-mono leading-none">DEBIAN AUDIO ENGINE</span>
+          <span className="text-[10px] text-[#555555] font-mono leading-none">
+            DEBIAN AUDIO ENGINE
+          </span>
         </div>
       </div>
 
@@ -85,23 +94,31 @@ export const TopBar: React.FC<TopBarProps> = ({
         {/* Time LCD Box */}
         <div className="bg-black border border-[#222222] px-2 py-1 rounded flex items-center gap-2 font-mono text-center">
           <div className="flex flex-col items-start">
-            <span className="text-[9px] text-[#D4AF37] leading-none uppercase font-bold tracking-wider">POS</span>
-            <span className="text-xs font-bold text-[#00FF41] tracking-widest">{formatBarTime()}</span>
+            <span className="text-[9px] text-[#D4AF37] leading-none uppercase font-bold tracking-wider">
+              POS
+            </span>
+            <span className="text-xs font-bold text-[#00FF41] tracking-widest">
+              {formattedPosition}
+            </span>
           </div>
-          
+
           <div className="h-5 w-[1px] bg-[#222222]" />
 
           <div className="flex flex-col items-start hidden xs:flex">
-            <span className="text-[9px] text-[#555555] leading-none uppercase font-bold">TIME</span>
-            <span className="text-xs text-white">{getSecondsTime()}</span>
+            <span className="text-[9px] text-[#555555] leading-none uppercase font-bold">
+              TIME
+            </span>
+            <span className="text-xs text-white">{formattedTimecode}</span>
           </div>
 
           <div className="h-5 w-[1px] bg-[#222222] hidden xs:block" />
 
           {/* Tempo Display */}
           <div className="flex flex-col items-center">
-            <span className="text-[9px] text-[#D4AF37] leading-none uppercase font-bold">BPM</span>
-            <span className="text-xs font-bold text-white">{transport.bpm}</span>
+            <span className="text-[9px] text-[#D4AF37] leading-none uppercase font-bold">
+              BPM
+            </span>
+            <span className="text-xs font-bold text-white">{bpm}</span>
           </div>
         </div>
 
@@ -124,7 +141,11 @@ export const TopBar: React.FC<TopBarProps> = ({
             }`}
             title={transport.isPlaying ? 'Pause' : 'Play'}
           >
-            {transport.isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+            {transport.isPlaying ? (
+              <Pause className="w-4 h-4 fill-current" />
+            ) : (
+              <Play className="w-4 h-4 fill-current ml-0.5" />
+            )}
           </button>
 
           <button

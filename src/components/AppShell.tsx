@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ViewMode, InstrumentCategory, TrackType, ProjectState, TrackData } from '../types/daw';
+import {
+  ViewMode,
+  InstrumentCategory,
+  TrackType,
+  ProjectState,
+  TrackData,
+  TICKS_PER_BEAT,
+} from '../types/daw';
 import { INITIAL_PROJECT_STATE } from '../config/mockData';
 
 import { TopBar } from './TopBar';
@@ -15,12 +22,12 @@ export const AppShell: React.FC = () => {
   // Authoritative Single Musical Project State
   const [project, setProject] = useState<ProjectState>(INITIAL_PROJECT_STATE);
 
-  // Transient UI-only states
+  // Transient UI-only states (views, modal open state, orientation)
   const [viewMode, setViewMode] = useState<ViewMode>('tracks');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
 
-  // Track orientation changes
+  // Track orientation changes for responsive adaptivity
   useEffect(() => {
     const checkOrientation = () => {
       if (window.innerWidth > window.innerHeight) {
@@ -49,31 +56,38 @@ export const AppShell: React.FC = () => {
     const tick = (timestamp: number) => {
       if (lastTimeRef.current !== null) {
         const deltaMs = timestamp - lastTimeRef.current;
-        // Calculate ticks per ms based on BPM (960 ticks per beat)
-        const beatsPerMs = project.transport.bpm / 60000;
-        const ticksToAdd = deltaMs * beatsPerMs * 960;
+        // Calculate ticks per ms based on authoritative project BPM and TICKS_PER_BEAT (960 PPQ)
+        const beatsPerMs = project.bpm / 60000;
+        const ticksToAdd = deltaMs * beatsPerMs * TICKS_PER_BEAT;
 
         setProject((prev) => {
           let newTick = prev.transport.currentTick + ticksToAdd;
           let newBeat = prev.transport.currentBeat;
           let newBar = prev.transport.currentBar;
 
-          if (newTick >= 960) {
-            newBeat += Math.floor(newTick / 960);
-            newTick = newTick % 960;
+          if (newTick >= TICKS_PER_BEAT) {
+            newBeat += Math.floor(newTick / TICKS_PER_BEAT);
+            newTick = newTick % TICKS_PER_BEAT;
           }
 
-          if (newBeat > prev.transport.timeSignatureNumerator) {
-            newBar += Math.floor((newBeat - 1) / prev.transport.timeSignatureNumerator);
-            newBeat = ((newBeat - 1) % prev.transport.timeSignatureNumerator) + 1;
+          if (newBeat > prev.timeSignatureNumerator) {
+            newBar += Math.floor((newBeat - 1) / prev.timeSignatureNumerator);
+            newBeat = ((newBeat - 1) % prev.timeSignatureNumerator) + 1;
           }
 
-          // Loop check (bars 1-8 or 1-16)
-          const maxLoopBar = prev.transport.isLooping ? 9 : 25;
-          if (newBar >= maxLoopBar) {
-            newBar = 1;
-            newBeat = 1;
-            newTick = 0;
+          // Authoritative loop boundaries check
+          if (prev.transport.isLooping) {
+            if (newBar >= prev.loopEndBar) {
+              newBar = prev.loopStartBar;
+              newBeat = 1;
+              newTick = 0;
+            }
+          } else {
+            if (newBar > prev.totalBars) {
+              newBar = 1;
+              newBeat = 1;
+              newTick = 0;
+            }
           }
 
           return {
@@ -96,12 +110,15 @@ export const AppShell: React.FC = () => {
     return () => cancelAnimationFrame(animationFrameId);
   }, [
     project.transport.isPlaying,
-    project.transport.bpm,
-    project.transport.timeSignatureNumerator,
+    project.bpm,
+    project.timeSignatureNumerator,
     project.transport.isLooping,
+    project.loopStartBar,
+    project.loopEndBar,
+    project.totalBars,
   ]);
 
-  // Project Mutations
+  // Project Musical Metadata Mutations
   const handleUpdateProjectName = (name: string) => {
     setProject((prev) => ({ ...prev, name, updatedAt: Date.now() }));
   };
@@ -112,10 +129,6 @@ export const AppShell: React.FC = () => {
       ...prev,
       bpm: clampedBpm,
       updatedAt: Date.now(),
-      transport: {
-        ...prev.transport,
-        bpm: clampedBpm,
-      },
     }));
   };
 
@@ -124,10 +137,6 @@ export const AppShell: React.FC = () => {
       ...prev,
       keySignature,
       updatedAt: Date.now(),
-      transport: {
-        ...prev.transport,
-        keySignature,
-      },
     }));
   };
 
@@ -137,15 +146,10 @@ export const AppShell: React.FC = () => {
       timeSignatureNumerator: num,
       timeSignatureDenominator: den,
       updatedAt: Date.now(),
-      transport: {
-        ...prev.transport,
-        timeSignatureNumerator: num,
-        timeSignatureDenominator: den,
-      },
     }));
   };
 
-  // Transport Action Handlers
+  // Authoritative Transport Action Handlers
   const handleTogglePlay = () => {
     setProject((prev) => ({
       ...prev,
@@ -209,7 +213,7 @@ export const AppShell: React.FC = () => {
       ...prev,
       transport: {
         ...prev.transport,
-        currentBar: prev.transport.currentBar + 4,
+        currentBar: Math.min(prev.totalBars, prev.transport.currentBar + 4),
         currentBeat: 1,
         currentTick: 0,
       },
@@ -236,7 +240,19 @@ export const AppShell: React.FC = () => {
     }));
   };
 
-  // Track Action Handlers
+  const handleSetTransportPosition = (bar: number, beat: number, tick: number) => {
+    setProject((prev) => ({
+      ...prev,
+      transport: {
+        ...prev.transport,
+        currentBar: bar,
+        currentBeat: beat,
+        currentTick: tick,
+      },
+    }));
+  };
+
+  // Authoritative Track Action Handlers
   const handleToggleMute = (id: string) => {
     setProject((prev) => ({
       ...prev,
@@ -256,7 +272,7 @@ export const AppShell: React.FC = () => {
           t.id === id
             ? { ...t, soloed: newSoloState }
             : newSoloState
-            ? { ...t, soloed: false } // solo one track at a time
+            ? { ...t, soloed: false } // solo target track exclusively
             : t
         ),
       };
@@ -350,9 +366,10 @@ export const AppShell: React.FC = () => {
 
   const handleDeleteTrack = (id: string) => {
     setProject((prev) => {
-      if (prev.tracks.length <= 1) return prev; // Keep at least one track
+      if (prev.tracks.length <= 1) return prev; // Retain at least one track
       const newTracks = prev.tracks.filter((t) => t.id !== id);
-      const newSelected = prev.selectedTrackId === id ? (newTracks[0]?.id || null) : prev.selectedTrackId;
+      const newSelected =
+        prev.selectedTrackId === id ? (newTracks[0]?.id || null) : prev.selectedTrackId;
 
       return {
         ...prev,
@@ -367,24 +384,12 @@ export const AppShell: React.FC = () => {
     setProject(INITIAL_PROJECT_STATE);
   };
 
-  // Helper setter adapter for TrackList's ruler click which sets transport directly
-  const handleSetTransport: React.Dispatch<React.SetStateAction<ProjectState['transport']>> = (action) => {
-    setProject((prev) => {
-      const nextTransport = typeof action === 'function' ? action(prev.transport) : action;
-      return {
-        ...prev,
-        transport: nextTransport,
-      };
-    });
-  };
-
   return (
     <div className="flex flex-col h-screen w-screen bg-[#000000] text-white overflow-hidden select-none font-sans">
       {/* 1. TOP BAR */}
       <TopBar
-        projectName={project.name}
+        project={project}
         onUpdateProjectName={handleUpdateProjectName}
-        transport={project.transport}
         onTogglePlay={handleTogglePlay}
         onToggleRecord={handleToggleRecord}
         onStopTransport={handleStopTransport}
@@ -398,25 +403,22 @@ export const AppShell: React.FC = () => {
 
       {/* 2. TRANSPORT CONTROLS BAR */}
       <TransportControls
-        transport={project.transport}
+        project={project}
         onTogglePlay={handleTogglePlay}
         onToggleRecord={handleToggleRecord}
         onStopTransport={handleStopTransport}
         onRewind={handleRewind}
         onFastForward={handleFastForward}
         onToggleLoop={handleToggleLoop}
-        onAdjustBpm={(delta) => handleUpdateBpm(project.transport.bpm + delta)}
+        onAdjustBpm={(delta) => handleUpdateBpm(project.bpm + delta)}
       />
 
       {/* 3. MAIN WORKSPACE VIEW MODE SWITCHER */}
       <main className="flex-1 flex flex-col min-h-0 relative overflow-hidden bg-black">
         {viewMode === 'tracks' && (
           <TrackList
-            tracks={project.tracks}
-            selectedTrackId={project.selectedTrackId}
-            transport={project.transport}
-            sectionMarkers={project.sectionMarkers}
-            setTransport={handleSetTransport}
+            project={project}
+            onSetTransportPosition={handleSetTransportPosition}
             onToggleMute={handleToggleMute}
             onToggleSolo={handleToggleSolo}
             onToggleArm={handleToggleArm}

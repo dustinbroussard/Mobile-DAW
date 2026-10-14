@@ -1,14 +1,11 @@
 import React, { useRef, useState } from 'react';
-import { ZoomIn, ZoomOut, Grid, Plus, Layers, ArrowUp, ArrowDown, Trash2 } from 'lucide-react';
-import { TrackData, TransportState, SectionMarker } from '../types/daw';
+import { ZoomIn, ZoomOut, Grid, Plus, Layers, ArrowUp, ArrowDown, Trash2, Repeat } from 'lucide-react';
+import { ProjectState, TICKS_PER_BEAT } from '../types/daw';
 import { Track } from './Track';
 
 interface TrackListProps {
-  tracks: TrackData[];
-  selectedTrackId: string | null;
-  transport: TransportState;
-  sectionMarkers: SectionMarker[];
-  setTransport: React.Dispatch<React.SetStateAction<TransportState>>;
+  project: ProjectState;
+  onSetTransportPosition: (bar: number, beat: number, tick: number) => void;
   onToggleMute: (id: string) => void;
   onToggleSolo: (id: string) => void;
   onToggleArm: (id: string) => void;
@@ -21,11 +18,8 @@ interface TrackListProps {
 }
 
 export const TrackList: React.FC<TrackListProps> = ({
-  tracks,
-  selectedTrackId,
-  transport,
-  sectionMarkers,
-  setTransport,
+  project,
+  onSetTransportPosition,
   onToggleMute,
   onToggleSolo,
   onToggleArm,
@@ -36,7 +30,17 @@ export const TrackList: React.FC<TrackListProps> = ({
   onDeleteTrack,
   onAddTrack,
 }) => {
-  const [totalBars] = useState(24);
+  const {
+    tracks,
+    selectedTrackId,
+    transport,
+    sectionMarkers,
+    totalBars,
+    timeSignatureNumerator,
+    loopStartBar,
+    loopEndBar,
+  } = project;
+
   const [barWidthPx, setBarWidthPx] = useState(64); // default 64px per bar
   const [snapGrid, setSnapGrid] = useState('1/1');
   const [selectedRegionId, setSelectedRegionId] = useState<string | undefined>();
@@ -46,8 +50,8 @@ export const TrackList: React.FC<TrackListProps> = ({
   // Calculate current playhead position in pixels from bar 1
   const playheadPosPx =
     ((transport.currentBar - 1) +
-      (transport.currentBeat - 1) / transport.timeSignatureNumerator +
-      transport.currentTick / (transport.timeSignatureNumerator * 240)) *
+      (transport.currentBeat - 1) / timeSignatureNumerator +
+      transport.currentTick / (timeSignatureNumerator * TICKS_PER_BEAT)) *
     barWidthPx;
 
   // Jump playhead on click on ruler
@@ -57,18 +61,23 @@ export const TrackList: React.FC<TrackListProps> = ({
     const clickedBarFloat = clickX / barWidthPx + 1;
     const clickedBar = Math.max(1, Math.min(totalBars, Math.floor(clickedBarFloat)));
     const remainingFraction = clickedBarFloat - Math.floor(clickedBarFloat);
-    const clickedBeat = Math.max(1, Math.min(transport.timeSignatureNumerator, Math.floor(remainingFraction * transport.timeSignatureNumerator) + 1));
+    const clickedBeat = Math.max(
+      1,
+      Math.min(
+        timeSignatureNumerator,
+        Math.floor(remainingFraction * timeSignatureNumerator) + 1
+      )
+    );
 
-    setTransport((prev) => ({
-      ...prev,
-      currentBar: clickedBar,
-      currentBeat: clickedBeat,
-      currentTick: 0,
-    }));
+    onSetTransportPosition(clickedBar, clickedBeat, 0);
   };
 
   const zoomIn = () => setBarWidthPx((prev) => Math.min(120, prev + 12));
   const zoomOut = () => setBarWidthPx((prev) => Math.max(36, prev - 12));
+
+  // Loop bracket bounds in pixels
+  const loopLeftPx = (loopStartBar - 1) * barWidthPx;
+  const loopWidthPx = (loopEndBar - loopStartBar) * barWidthPx;
 
   return (
     <div className="flex flex-col flex-1 bg-black overflow-hidden select-none relative">
@@ -194,7 +203,7 @@ export const TrackList: React.FC<TrackListProps> = ({
           ))}
         </div>
 
-        {/* Timeline Timeline Column */}
+        {/* Timeline Column */}
         <div className="relative min-h-full flex-1 bg-black" style={{ width: `${totalBars * barWidthPx}px` }}>
           {/* Measure Ruler Top Bar */}
           <div
@@ -202,6 +211,23 @@ export const TrackList: React.FC<TrackListProps> = ({
             className="h-9 bg-[#121212] border-b border-[#222222] sticky top-0 z-20 cursor-pointer select-none flex relative"
             style={{ width: `${totalBars * barWidthPx}px` }}
           >
+            {/* Active Loop Region Highlight in Ruler */}
+            {transport.isLooping && (
+              <div
+                className="absolute top-0 bottom-0 bg-[#00E5FF]/10 border-t-2 border-b-2 border-[#00E5FF] pointer-events-none flex items-center justify-between px-1"
+                style={{
+                  left: `${loopLeftPx}px`,
+                  width: `${loopWidthPx}px`,
+                }}
+              >
+                <div className="w-1.5 h-full bg-[#00E5FF]" />
+                <span className="text-[8px] font-mono text-[#00E5FF] font-bold flex items-center gap-0.5">
+                  <Repeat className="w-2.5 h-2.5" /> LOOP
+                </span>
+                <div className="w-1.5 h-full bg-[#00E5FF]" />
+              </div>
+            )}
+
             {/* Render Section Markers (Gold #D4AF37) */}
             {sectionMarkers.map((marker) => {
               const leftPx = (marker.bar - 1) * barWidthPx;

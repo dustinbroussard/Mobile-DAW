@@ -1,9 +1,9 @@
 import React from 'react';
 import { Play, Pause, Square, Circle, SkipBack, SkipForward, Repeat } from 'lucide-react';
-import { TransportState } from '../types/daw';
+import { ProjectState } from '../types/daw';
 
 interface TransportControlsProps {
-  transport: TransportState;
+  project: ProjectState;
   onTogglePlay: () => void;
   onToggleRecord: () => void;
   onStopTransport: () => void;
@@ -14,7 +14,7 @@ interface TransportControlsProps {
 }
 
 export const TransportControls: React.FC<TransportControlsProps> = ({
-  transport,
+  project,
   onTogglePlay,
   onToggleRecord,
   onStopTransport,
@@ -23,6 +23,8 @@ export const TransportControls: React.FC<TransportControlsProps> = ({
   onToggleLoop,
   onAdjustBpm,
 }) => {
+  const { transport, bpm, timeSignatureNumerator, timeSignatureDenominator } = project;
+
   return (
     <div className="bg-[#121212] border-b border-[#222222] px-3 py-2 flex items-center justify-between gap-2 overflow-x-auto select-none">
       {/* Left: Loop & Grid Navigation */}
@@ -34,7 +36,7 @@ export const TransportControls: React.FC<TransportControlsProps> = ({
               ? 'border-[#00E5FF] text-[#00E5FF] bg-[#00E5FF]/10 shadow-[0_0_10px_rgba(0,229,255,0.25)] font-bold'
               : 'border-[#222222] text-[#555555] bg-[#161616] hover:text-white'
           }`}
-          title="Loop Playback (Bars 1-8)"
+          title={`Loop Range (Bars ${project.loopStartBar}-${project.loopEndBar - 1})`}
         >
           <Repeat className="w-4 h-4" />
           <span>LOOP</span>
@@ -103,7 +105,7 @@ export const TransportControls: React.FC<TransportControlsProps> = ({
       <div className="flex items-center gap-1.5 shrink-0 bg-black border border-[#222222] rounded-lg p-1">
         <div className="flex flex-col items-center px-1">
           <span className="text-[9px] text-[#D4AF37] font-mono font-bold leading-none">TEMPO</span>
-          <span className="text-sm font-mono font-bold text-white leading-none mt-0.5">{transport.bpm}</span>
+          <span className="text-sm font-mono font-bold text-white leading-none mt-0.5">{bpm}</span>
         </div>
 
         <div className="flex flex-col gap-0.5">
@@ -126,7 +128,7 @@ export const TransportControls: React.FC<TransportControlsProps> = ({
         <div className="flex flex-col items-center px-1 font-mono">
           <span className="text-[9px] text-[#555555] font-bold leading-none">SIG</span>
           <span className="text-xs font-bold text-white leading-none mt-0.5">
-            {transport.timeSignatureNumerator}/{transport.timeSignatureDenominator}
+            {timeSignatureNumerator}/{timeSignatureDenominator}
           </span>
         </div>
       </div>
