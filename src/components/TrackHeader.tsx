@@ -1,5 +1,4 @@
 import React from 'react';
-import { ChevronRight } from 'lucide-react';
 import { TrackData } from '../types/daw';
 import { getTrackColor, getLEDGlowStyle } from '../config/theme';
 
@@ -12,8 +11,6 @@ interface TrackHeaderProps {
   onToggleArm: (id: string) => void;
   onVolumeChange: (id: string, vol: number) => void;
   onSelectTrack: (id: string) => void;
-  onToggleExpandInspector?: (id: string) => void;
-  isExpanded?: boolean;
 }
 
 export const TrackHeader: React.FC<TrackHeaderProps> = ({
@@ -25,8 +22,6 @@ export const TrackHeader: React.FC<TrackHeaderProps> = ({
   onToggleArm,
   onVolumeChange,
   onSelectTrack,
-  onToggleExpandInspector,
-  isExpanded,
 }) => {
   // Convert 0-100 volume scale to dB readout
   const getVolumeDb = (vol: number) => {
@@ -42,8 +37,8 @@ export const TrackHeader: React.FC<TrackHeaderProps> = ({
   return (
     <div
       onClick={() => onSelectTrack(track.id)}
-      className={`relative flex items-center h-16 bg-[#121212] border-b border-[#222222] transition-colors select-none group cursor-pointer ${
-        isSelected ? 'bg-[#161616]' : 'hover:bg-[#141414]'
+      className={`relative flex items-center h-16 border-b border-[#222222] transition-colors select-none group cursor-pointer ${
+        isSelected ? 'bg-[#181818]' : 'bg-[#121212] hover:bg-[#151515]'
       }`}
     >
       {/* Colored Left-Edge Accent Indicator Bar */}
@@ -55,9 +50,9 @@ export const TrackHeader: React.FC<TrackHeaderProps> = ({
         }}
       />
 
-      <div className="flex items-center justify-between w-full px-2 gap-1.5 min-w-0">
-        {/* Track Number & Instrument Name */}
-        <div className="flex items-center gap-2 min-w-0 max-w-[140px] shrink-0">
+      <div className="flex items-center justify-between w-full px-2 gap-2 min-w-0">
+        {/* Track Number & Instrument Information */}
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
           <span
             className="font-mono text-xs font-bold shrink-0"
             style={{ color: accentColor }}
@@ -67,7 +62,12 @@ export const TrackHeader: React.FC<TrackHeaderProps> = ({
 
           <div className="flex flex-col min-w-0">
             <div className="flex items-center gap-1">
-              <span className={`text-xs font-semibold truncate ${track.muted ? 'text-[#555555] line-through' : 'text-white'}`}>
+              <span
+                className={`text-xs font-semibold truncate ${
+                  track.muted ? 'text-[#555555] line-through' : 'text-white'
+                }`}
+                title={track.name}
+              >
                 {track.name}
               </span>
               <span className="text-[8px] font-mono px-1 rounded bg-black/60 border border-[#222222] text-[#888888] uppercase shrink-0">
@@ -80,7 +80,7 @@ export const TrackHeader: React.FC<TrackHeaderProps> = ({
           </div>
         </div>
 
-        {/* Quick Touch Controls: M, S, REC (Minimum touch target compliant) */}
+        {/* Quick Touch Controls: M, S, REC */}
         <div className="flex items-center gap-1 shrink-0">
           {/* MUTE */}
           <button
@@ -132,7 +132,7 @@ export const TrackHeader: React.FC<TrackHeaderProps> = ({
         </div>
 
         {/* Volume Fader & dB Readout */}
-        <div className="hidden sm:flex items-center gap-1.5 shrink-0 bg-black/60 border border-[#222222] px-2 py-1 rounded">
+        <div className="hidden sm:flex items-center gap-1.5 shrink-0 bg-black/70 border border-[#222222] px-2 py-1 rounded">
           <input
             type="range"
             min="0"
@@ -142,28 +142,12 @@ export const TrackHeader: React.FC<TrackHeaderProps> = ({
               e.stopPropagation();
               onVolumeChange(track.id, Number(e.target.value));
             }}
-            className="w-16 accent-[#00FF41] cursor-pointer h-1.5 bg-[#222222] rounded-lg"
+            className="w-14 accent-[#00FF41] cursor-pointer h-1.5 bg-[#222222] rounded-lg"
           />
-          <span className="text-[10px] font-mono text-[#D4AF37] min-w-[36px] text-right font-semibold">
+          <span className="text-[10px] font-mono text-[#D4AF37] min-w-[34px] text-right font-semibold">
             {getVolumeDb(track.volume)}
           </span>
         </div>
-
-        {/* Track Detail / Inspector Expander */}
-        {onToggleExpandInspector && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleExpandInspector(track.id);
-            }}
-            className={`w-6 h-6 rounded flex items-center justify-center transition-transform ${
-              isExpanded ? 'rotate-90 text-[#00E5FF]' : 'text-[#555555] hover:text-white'
-            }`}
-            title="Toggle Track Inspector"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        )}
       </div>
     </div>
   );

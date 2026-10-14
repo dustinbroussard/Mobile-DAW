@@ -24,7 +24,6 @@ export const TrackList: React.FC<TrackListProps> = ({
   onToggleSolo,
   onToggleArm,
   onVolumeChange,
-  onPanChange,
   onSelectTrack,
   onReorderTrack,
   onDeleteTrack,
@@ -175,14 +174,17 @@ export const TrackList: React.FC<TrackListProps> = ({
       {/* Main Scrollable Track Area */}
       <div className="flex-1 overflow-auto flex relative" ref={timelineContainerRef}>
         {/* Track Headers Column (Sticky Left) */}
-        <div className="w-[200px] sm:w-[240px] shrink-0 sticky left-0 z-30 bg-[#121212] border-r border-[#222222]">
+        <div className="w-[240px] sm:w-[320px] shrink-0 sticky left-0 z-30 bg-[#121212] border-r border-[#222222] shadow-[4px_0_12px_rgba(0,0,0,0.6)]">
           {/* Header Corner Box */}
           <div className="h-9 bg-[#121212] border-b border-[#222222] px-3 flex items-center justify-between text-[10px] font-mono text-[#555555]">
-            <span>INSTRUMENT</span>
-            <span>M S REC</span>
+            <span>TRACK / INSTRUMENT</span>
+            <span className="flex items-center gap-3">
+              <span>M S REC</span>
+              <span className="hidden sm:inline">VOL (dB)</span>
+            </span>
           </div>
 
-          {/* Track Headers */}
+          {/* Track Headers (Single instance per track) */}
           {tracks.map((track, idx) => (
             <Track
               key={track.id}
@@ -196,14 +198,13 @@ export const TrackList: React.FC<TrackListProps> = ({
               onToggleSolo={onToggleSolo}
               onToggleArm={onToggleArm}
               onVolumeChange={onVolumeChange}
-              onPanChange={onPanChange}
               onSelectTrack={onSelectTrack}
-              isHeaderOnly
+              renderMode="header"
             />
           ))}
         </div>
 
-        {/* Timeline Column */}
+        {/* Timeline Column (Clips and grid only, zero duplicate headers) */}
         <div className="relative min-h-full flex-1 bg-black" style={{ width: `${totalBars * barWidthPx}px` }}>
           {/* Measure Ruler Top Bar */}
           <div
@@ -267,6 +268,7 @@ export const TrackList: React.FC<TrackListProps> = ({
               <div className="w-3 h-3 bg-[#00FF41] rotate-45 -ml-[5px] -mt-1 shadow-[0_0_8px_#00FF41]" />
             </div>
 
+            {/* Track Timeline Rows */}
             {tracks.map((track, idx) => (
               <Track
                 key={track.id}
@@ -280,10 +282,10 @@ export const TrackList: React.FC<TrackListProps> = ({
                 onToggleSolo={onToggleSolo}
                 onToggleArm={onToggleArm}
                 onVolumeChange={onVolumeChange}
-                onPanChange={onPanChange}
                 onSelectTrack={onSelectTrack}
                 onSelectRegion={(_tId, rId) => setSelectedRegionId(rId)}
                 selectedRegionId={selectedRegionId}
+                renderMode="timeline"
               />
             ))}
           </div>
