@@ -1,0 +1,6 @@
+{
+  "name": "Mobile DAW Studio",
+  "description": "Mobile-first digital audio workstation for touch interaction with MIDI sequencing, multitrack timeline, and mixing architecture.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
