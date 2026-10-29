@@ -1,13 +1,22 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   ViewMode,
   InstrumentCategory,
   TrackType,
   ProjectState,
   TrackData,
+  MidiNote,
   TICKS_PER_BEAT,
 } from '../types/daw';
 import { INITIAL_PROJECT_STATE } from '../config/mockData';
+import {
+  downloadProjectFile,
+  getProjectFingerprint,
+  loadProjectFromLocalStorage,
+  readProjectFromFile,
+  saveProjectToLocalStorage,
+  clearLocalStorageAutosave,
+} from '../utils/projectPersistence';
 
 import { TopBar } from './TopBar';
 import { TransportControls } from './TransportControls';
@@ -17,15 +26,87 @@ import { MixerView } from './MixerView';
 import { ProjectView } from './ProjectView';
 import { BottomNavigation } from './BottomNavigation';
 import { ProjectMenuModal } from './ProjectMenuModal';
+import { UnsavedChangesModal } from './UnsavedChangesModal';
+import { SaveAsModal } from './SaveAsModal';
+import { FileErrorModal } from './FileErrorModal';
+import { MidiImportModal } from './MidiImportModal';
+import {
+  analyzeMidiFile,
+  convertMidiToProject,
+  downloadMidiFile,
+  MidiAnalysisResult,
+  Midi,
+} from '../utils/midiConverter';
+import { Check, Info } from 'lucide-react';
 
 export const AppShell: React.FC = () => {
-  // Authoritative Single Musical Project State
-  const [project, setProject] = useState<ProjectState>(INITIAL_PROJECT_STATE);
+  // Try to load last autosaved project from localStorage on initial render
+  const [initialLoadedData] = useState(() => {
+    const autosaved = loadProjectFromLocalStorage();
+    if (autosaved?.project) {
+      return {
+        project: autosaved.project,
+        isRestored: true,
+        restoredTime: new Date(autosaved.timestamp).toLocaleTimeString(),
+      };
+    }
+    return {
+      project: INITIAL_PROJECT_STATE,
+      isRestored: false,
+      restoredTime: null,
+    };
+  });
 
-  // Transient UI-only states (views, modal open state, orientation)
+  // Authoritative Single Musical Project State
+  const [project, setProject] = useState<ProjectState>(initialLoadedData.project);
+
+  // Persistence State
+  const [lastSavedFingerprint, setLastSavedFingerprint] = useState<string>(() =>
+    getProjectFingerprint(initialLoadedData.project)
+  );
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+
+  // Unsaved changes detection
+  const currentFingerprint = useMemo(() => getProjectFingerprint(project), [project]);
+  const hasUnsavedChanges = currentFingerprint !== lastSavedFingerprint;
+
+  // Transient UI-only states (views, modals, notifications, orientation)
   const [viewMode, setViewMode] = useState<ViewMode>('tracks');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isSaveAsOpen, setIsSaveAsOpen] = useState(false);
+  const [isUnsavedWarningOpen, setIsUnsavedWarningOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<{
+    type: 'new' | 'open' | 'reset';
+    file?: File;
+  } | null>(null);
+  const [fileErrorMessage, setFileErrorMessage] = useState<string | null>(null);
+
+  // Standard MIDI Import & Export State
+  const [midiAnalysis, setMidiAnalysis] = useState<MidiAnalysisResult | null>(null);
+  const [parsedMidi, setParsedMidi] = useState<Midi | null>(null);
+  const [isMidiImportOpen, setIsMidiImportOpen] = useState(false);
+
+  const [toastMessage, setToastMessage] = useState<string | null>(
+    initialLoadedData.isRestored
+      ? `Restored autosaved session (${initialLoadedData.restoredTime})`
+      : null
+  );
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((curr) => (curr === msg ? null : curr));
+    }, 3500);
+  };
+
+  // Autosave to localStorage on project state changes (debounced by 800ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveProjectToLocalStorage(project);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [project]);
 
   // Track orientation changes for responsive adaptivity
   useEffect(() => {
@@ -264,17 +345,14 @@ export const AppShell: React.FC = () => {
   const handleToggleSolo = (id: string) => {
     setProject((prev) => {
       const target = prev.tracks.find((t) => t.id === id);
-      const newSoloState = !target?.soloed;
+      const isSoloing = !target?.soloed;
       return {
         ...prev,
         updatedAt: Date.now(),
-        tracks: prev.tracks.map((t) =>
-          t.id === id
-            ? { ...t, soloed: newSoloState }
-            : newSoloState
-            ? { ...t, soloed: false } // solo target track exclusively
-            : t
-        ),
+        tracks: prev.tracks.map((t) => {
+          if (t.id === id) return { ...t, soloed: isSoloing };
+          return isSoloing ? { ...t, soloed: false } : t;
+        }),
       };
     });
   };
@@ -304,44 +382,84 @@ export const AppShell: React.FC = () => {
   };
 
   const handleSelectTrack = (id: string) => {
+    setProject((prev) => {
+      const target = prev.tracks.find((t) => t.id === id);
+      const firstRegionId = target?.regions[0]?.id || null;
+      return {
+        ...prev,
+        selectedTrackId: id,
+        selectedRegionId: firstRegionId,
+      };
+    });
+  };
+
+  const handleSelectRegion = (trackId: string, regionId: string) => {
     setProject((prev) => ({
       ...prev,
-      selectedTrackId: id,
+      selectedTrackId: trackId,
+      selectedRegionId: regionId,
     }));
   };
 
-  const handleAddTrack = (category: InstrumentCategory, name: string, trackType: TrackType) => {
-    setProject((prev) => {
-      const nextNumber = prev.tracks.length + 1;
-      const newTrack: TrackData = {
-        id: `tr-${Date.now()}`,
-        trackNumber: nextNumber,
-        name,
-        category,
-        trackType,
-        muted: false,
-        soloed: false,
-        armed: false,
-        volume: 80,
-        pan: 0,
-        regions: [
-          {
-            id: `rg-${Date.now()}`,
-            name: `${name} Clip`,
-            startBar: 1,
-            lengthBars: 4,
-            type: trackType,
-          },
-        ],
-      };
+  // Real MIDI Note Mutation Handler (Used by PianoRollView)
+  const handleUpdateNotes = (trackId: string, regionId: string, notes: MidiNote[]) => {
+    setProject((prev) => ({
+      ...prev,
+      updatedAt: Date.now(),
+      tracks: prev.tracks.map((track) => {
+        if (track.id !== trackId) return track;
+        return {
+          ...track,
+          regions: track.regions.map((region) => {
+            if (region.id !== regionId) return region;
+            return {
+              ...region,
+              notes,
+            };
+          }),
+        };
+      }),
+    }));
+  };
 
-      return {
-        ...prev,
-        updatedAt: Date.now(),
-        tracks: [...prev.tracks, newTrack],
-        selectedTrackId: newTrack.id,
-      };
-    });
+  // Track Creation, Reordering & Deletion
+  const handleAddTrack = (category: InstrumentCategory, name: string, trackType: TrackType) => {
+    const newTrackId = `tr-${Date.now()}`;
+    const newRegionId = `rg-${newTrackId}-1`;
+
+    const newTrack: TrackData = {
+      id: newTrackId,
+      trackNumber: project.tracks.length + 1,
+      name,
+      category,
+      trackType,
+      volume: 80,
+      pan: 0,
+      muted: false,
+      soloed: false,
+      armed: false,
+      programNumber: 0,
+      midiChannel: (project.tracks.length % 16) + 1,
+      regions: [
+        {
+          id: newRegionId,
+          name: `${name} Clip 1`,
+          startBar: 1,
+          lengthBars: 4,
+          type: trackType,
+          notes: [],
+        },
+      ],
+    };
+
+    setProject((prev) => ({
+      ...prev,
+      updatedAt: Date.now(),
+      tracks: [...prev.tracks, newTrack],
+      selectedTrackId: newTrackId,
+      selectedRegionId: newRegionId,
+    }));
+    showToast(`Added track "${name}"`);
   };
 
   const handleReorderTrack = (id: string, direction: 'up' | 'down') => {
@@ -351,8 +469,8 @@ export const AppShell: React.FC = () => {
       if (direction === 'up' && index === 0) return prev;
       if (direction === 'down' && index === prev.tracks.length - 1) return prev;
 
-      const newTracks = [...prev.tracks];
       const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      const newTracks = [...prev.tracks];
       const [moved] = newTracks.splice(index, 1);
       newTracks.splice(targetIndex, 0, moved);
 
@@ -370,25 +488,234 @@ export const AppShell: React.FC = () => {
       const newTracks = prev.tracks.filter((t) => t.id !== id);
       const newSelected =
         prev.selectedTrackId === id ? (newTracks[0]?.id || null) : prev.selectedTrackId;
+      const newRegionSelected =
+        newTracks.find((t) => t.id === newSelected)?.regions[0]?.id || null;
 
       return {
         ...prev,
         updatedAt: Date.now(),
         tracks: newTracks,
         selectedTrackId: newSelected,
+        selectedRegionId: newRegionSelected,
       };
     });
+    showToast('Track deleted');
   };
 
-  const handleResetProject = () => {
+  // ==========================================
+  // PERSISTENCE ACTIONS (SAVE, SAVE AS, OPEN, NEW)
+  // ==========================================
+
+  // Save Project (Direct download of .dawproj and fingerprint sync)
+  const handleSaveProject = () => {
+    const filename = downloadProjectFile(project);
+    const newFingerprint = getProjectFingerprint(project);
+    setLastSavedFingerprint(newFingerprint);
+    const timeStr = new Date().toLocaleTimeString();
+    setLastSavedAt(timeStr);
+    saveProjectToLocalStorage(project);
+    showToast(`Saved project file "${filename}"`);
+  };
+
+  // Save As (Download with custom filename)
+  const handleSaveAs = (customFilename: string) => {
+    const filename = downloadProjectFile(project, customFilename);
+    const newFingerprint = getProjectFingerprint(project);
+    setLastSavedFingerprint(newFingerprint);
+    const timeStr = new Date().toLocaleTimeString();
+    setLastSavedAt(timeStr);
+    saveProjectToLocalStorage(project);
+    showToast(`Saved as "${filename}"`);
+  };
+
+  // Execute Open Project
+  const executeOpenProject = async (file: File) => {
+    const result = await readProjectFromFile(file);
+    if (result.success === false) {
+      setFileErrorMessage(result.error);
+      return;
+    }
+
+    setProject(result.project);
+    const newFingerprint = getProjectFingerprint(result.project);
+    setLastSavedFingerprint(newFingerprint);
+    const timeStr = new Date().toLocaleTimeString();
+    setLastSavedAt(timeStr);
+    saveProjectToLocalStorage(result.project);
+
+    if (result.warnings && result.warnings.length > 0) {
+      showToast(`Loaded "${result.project.name}" with minor adjustments`);
+    } else {
+      showToast(`Loaded project "${result.project.name}"`);
+    }
+  };
+
+  // Execute New Project
+  const executeNewProject = () => {
+    const freshProject: ProjectState = {
+      ...INITIAL_PROJECT_STATE,
+      id: `proj-${Date.now()}`,
+      name: 'Untitled Project',
+      updatedAt: Date.now(),
+    };
+    setProject(freshProject);
+    setLastSavedFingerprint(getProjectFingerprint(freshProject));
+    setLastSavedAt(null);
+    clearLocalStorageAutosave();
+    saveProjectToLocalStorage(freshProject);
+    showToast('Started new project session');
+  };
+
+  // Execute Reset Project
+  const executeResetProject = () => {
     setProject(INITIAL_PROJECT_STATE);
+    setLastSavedFingerprint(getProjectFingerprint(INITIAL_PROJECT_STATE));
+    setLastSavedAt(null);
+    saveProjectToLocalStorage(INITIAL_PROJECT_STATE);
+    showToast('Reset project to default template');
+  };
+
+  // ==========================================
+  // STANDARD MIDI I/O ACTIONS (.MID / .MIDI)
+  // ==========================================
+
+  // Open & analyze standard MIDI file
+  const handleRequestOpenMidiFile = async (file: File) => {
+    try {
+      const buffer = await file.arrayBuffer();
+      const result = analyzeMidiFile(buffer, file.name);
+
+      if (result.success === false) {
+        setFileErrorMessage(result.error);
+        return;
+      }
+
+      setMidiAnalysis(result.analysis);
+      setParsedMidi(result.midi);
+      setIsMidiImportOpen(true);
+    } catch (err) {
+      setFileErrorMessage(`Failed to read MIDI file: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  // Confirm MIDI import into active workspace
+  const handleConfirmMidiImport = () => {
+    if (!parsedMidi) return;
+
+    const { project: importedProject, warnings } = convertMidiToProject(parsedMidi, {
+      fileName: midiAnalysis?.fileName,
+    });
+
+    setProject(importedProject);
+    const newFingerprint = getProjectFingerprint(importedProject);
+    setLastSavedFingerprint(newFingerprint);
+    setLastSavedAt(null);
+    saveProjectToLocalStorage(importedProject);
+
+    setIsMidiImportOpen(false);
+    setMidiAnalysis(null);
+    setParsedMidi(null);
+
+    const noteCount = midiAnalysis?.totalNotes || 0;
+    const trackCount = importedProject.tracks.length;
+    showToast(`Imported MIDI "${importedProject.name}" (${trackCount} tracks, ${noteCount} notes)`);
+
+    if (warnings.length > 0) {
+      setTimeout(() => {
+        showToast(warnings[0]);
+      }, 3600);
+    }
+  };
+
+  // Export current live project as standard Type 1 MIDI file
+  const handleExportMidi = () => {
+    try {
+      downloadMidiFile(project);
+      const cleanName = project.name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      showToast(`Exported standard MIDI "${cleanName}.mid"`);
+    } catch (err) {
+      setFileErrorMessage(`Failed to export MIDI file: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  // Guarded actions with unsaved work check
+  const handleRequestOpenProjectFile = (file: File) => {
+    if (hasUnsavedChanges) {
+      setPendingAction({ type: 'open', file });
+      setIsUnsavedWarningOpen(true);
+    } else {
+      executeOpenProject(file);
+    }
+  };
+
+  const handleRequestNewProject = () => {
+    if (hasUnsavedChanges) {
+      setPendingAction({ type: 'new' });
+      setIsUnsavedWarningOpen(true);
+    } else {
+      executeNewProject();
+    }
+  };
+
+  const handleRequestResetProject = () => {
+    if (hasUnsavedChanges) {
+      setPendingAction({ type: 'reset' });
+      setIsUnsavedWarningOpen(true);
+    } else {
+      executeResetProject();
+    }
+  };
+
+  // Unsaved changes confirmation handlers
+  const handleSaveAndProceed = () => {
+    handleSaveProject();
+    setIsUnsavedWarningOpen(false);
+    if (!pendingAction) return;
+
+    if (pendingAction.type === 'open' && pendingAction.file) {
+      executeOpenProject(pendingAction.file);
+    } else if (pendingAction.type === 'new') {
+      executeNewProject();
+    } else if (pendingAction.type === 'reset') {
+      executeResetProject();
+    }
+    setPendingAction(null);
+  };
+
+  const handleDiscardAndProceed = () => {
+    setIsUnsavedWarningOpen(false);
+    if (!pendingAction) return;
+
+    if (pendingAction.type === 'open' && pendingAction.file) {
+      executeOpenProject(pendingAction.file);
+    } else if (pendingAction.type === 'new') {
+      executeNewProject();
+    } else if (pendingAction.type === 'reset') {
+      executeResetProject();
+    }
+    setPendingAction(null);
+  };
+
+  const handleCancelPendingAction = () => {
+    setIsUnsavedWarningOpen(false);
+    setPendingAction(null);
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#000000] text-white overflow-hidden select-none font-sans">
+    <div className="flex flex-col h-screen w-screen bg-[#000000] text-white overflow-hidden select-none font-sans relative">
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-50 bg-[#121212] border border-[#00FF41] text-[#00FF41] px-4 py-2 rounded-lg text-xs font-mono shadow-[0_0_20px_rgba(0,255,65,0.3)] flex items-center gap-2 animate-bounce">
+          <Check className="w-4 h-4 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       {/* 1. TOP BAR */}
       <TopBar
         project={project}
+        hasUnsavedChanges={hasUnsavedChanges}
+        onSaveProject={handleSaveProject}
         onUpdateProjectName={handleUpdateProjectName}
         onTogglePlay={handleTogglePlay}
         onToggleRecord={handleToggleRecord}
@@ -425,6 +752,7 @@ export const AppShell: React.FC = () => {
             onVolumeChange={handleVolumeChange}
             onPanChange={handlePanChange}
             onSelectTrack={handleSelectTrack}
+            onSelectRegion={handleSelectRegion}
             onReorderTrack={handleReorderTrack}
             onDeleteTrack={handleDeleteTrack}
             onAddTrack={() => setIsMenuOpen(true)}
@@ -435,7 +763,10 @@ export const AppShell: React.FC = () => {
           <PianoRollView
             tracks={project.tracks}
             selectedTrackId={project.selectedTrackId}
+            selectedRegionId={project.selectedRegionId}
             onSelectTrack={handleSelectTrack}
+            onSelectRegion={handleSelectRegion}
+            onUpdateNotes={handleUpdateNotes}
           />
         )}
 
@@ -456,11 +787,19 @@ export const AppShell: React.FC = () => {
         {viewMode === 'project' && (
           <ProjectView
             project={project}
+            hasUnsavedChanges={hasUnsavedChanges}
+            lastSavedAt={lastSavedAt}
             onUpdateProjectName={handleUpdateProjectName}
             onUpdateBpm={handleUpdateBpm}
             onUpdateKeySignature={handleUpdateKeySignature}
             onUpdateTimeSignature={handleUpdateTimeSignature}
-            onResetProject={handleResetProject}
+            onResetProject={handleRequestResetProject}
+            onSaveProject={handleSaveProject}
+            onOpenSaveAs={() => setIsSaveAsOpen(true)}
+            onOpenProjectFile={handleRequestOpenProjectFile}
+            onNewProject={handleRequestNewProject}
+            onOpenMidiFile={handleRequestOpenMidiFile}
+            onExportMidi={handleExportMidi}
           />
         )}
       </main>
@@ -471,12 +810,65 @@ export const AppShell: React.FC = () => {
         onSelectView={setViewMode}
       />
 
-      {/* Project & Track Manager Modal */}
+      {/* Project & File Manager Modal */}
       <ProjectMenuModal
         isOpen={isMenuOpen}
         onClose={() => setIsMenuOpen(false)}
+        projectName={project.name}
+        hasUnsavedChanges={hasUnsavedChanges}
+        lastSavedAt={lastSavedAt}
         onAddTrack={handleAddTrack}
-        onResetProject={handleResetProject}
+        onNewProject={handleRequestNewProject}
+        onOpenProjectFile={handleRequestOpenProjectFile}
+        onSaveProject={handleSaveProject}
+        onOpenSaveAs={() => setIsSaveAsOpen(true)}
+        onResetProject={handleRequestResetProject}
+        onOpenMidiFile={handleRequestOpenMidiFile}
+        onExportMidi={handleExportMidi}
+      />
+
+      {/* Save As Modal */}
+      <SaveAsModal
+        isOpen={isSaveAsOpen}
+        currentName={project.name}
+        onSaveAs={handleSaveAs}
+        onClose={() => setIsSaveAsOpen(false)}
+      />
+
+      {/* Unsaved Changes Warning Modal */}
+      <UnsavedChangesModal
+        isOpen={isUnsavedWarningOpen}
+        projectName={project.name}
+        actionTitle={
+          pendingAction?.type === 'new'
+            ? 'Start New Project'
+            : pendingAction?.type === 'open'
+            ? `Open "${pendingAction.file?.name || 'File'}"`
+            : 'Reset Session to Default Tracks'
+        }
+        onSaveAndProceed={handleSaveAndProceed}
+        onDiscardAndProceed={handleDiscardAndProceed}
+        onCancel={handleCancelPendingAction}
+      />
+
+      {/* File Format & Validation Error Modal */}
+      <FileErrorModal
+        isOpen={Boolean(fileErrorMessage)}
+        errorMessage={fileErrorMessage}
+        onClose={() => setFileErrorMessage(null)}
+      />
+
+      {/* Standard MIDI File Import & Review Modal */}
+      <MidiImportModal
+        isOpen={isMidiImportOpen}
+        onClose={() => {
+          setIsMidiImportOpen(false);
+          setMidiAnalysis(null);
+          setParsedMidi(null);
+        }}
+        analysis={midiAnalysis}
+        hasUnsavedChanges={hasUnsavedChanges}
+        onConfirmImport={handleConfirmMidiImport}
       />
     </div>
   );

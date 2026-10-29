@@ -17,7 +17,7 @@ interface TrackProps {
   onPanChange?: (id: string, pan: number) => void;
   onSelectTrack: (id: string) => void;
   onSelectRegion?: (trackId: string, regionId: string) => void;
-  selectedRegionId?: string;
+  selectedRegionId?: string | null;
   renderMode?: 'header' | 'timeline';
 }
 

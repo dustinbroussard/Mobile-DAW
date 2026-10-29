@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrackData, ClipRegion } from '../types/daw';
+import { TrackData, ClipRegion, TICKS_PER_BEAT } from '../types/daw';
 import { DAW_THEME, getTrackColor } from '../config/theme';
 
 interface TrackTimelineProps {
@@ -8,7 +8,7 @@ interface TrackTimelineProps {
   barWidthPx: number; // e.g. 60px per bar
   currentBar: number;
   onSelectRegion?: (trackId: string, regionId: string) => void;
-  selectedRegionId?: string;
+  selectedRegionId?: string | null;
 }
 
 export const TrackTimeline: React.FC<TrackTimelineProps> = ({
@@ -22,27 +22,50 @@ export const TrackTimeline: React.FC<TrackTimelineProps> = ({
   const rawColor = getTrackColor(track.category);
   const accentColor = track.muted ? DAW_THEME.mutedState : rawColor;
 
-  // Render dummy waveform or note dot patterns inside region
+  // Render real MIDI notes preview or audio waveform inside region
   const renderClipContent = (region: ClipRegion) => {
     if (region.type === 'midi') {
+      const hasNotes = region.notes && region.notes.length > 0;
+      const totalRegionTicks = Math.max(1, region.lengthBars * 4 * TICKS_PER_BEAT);
+
       return (
-        <div className="w-full h-full p-1 flex flex-col justify-between overflow-hidden opacity-80">
-          <div className="flex items-center justify-between text-[9px] font-mono font-bold truncate">
+        <div className="w-full h-full p-1 flex flex-col justify-between overflow-hidden opacity-90">
+          <div className="flex items-center justify-between text-[9px] font-mono font-bold truncate z-10">
             <span className="truncate">{region.name}</span>
-            <span className="text-[8px] opacity-70 ml-1 font-normal">MIDI</span>
+            <span className="text-[8px] opacity-70 ml-1 font-normal">
+              {hasNotes ? `${region.notes.length} NOTES` : 'MIDI'}
+            </span>
           </div>
-          <div className="grid grid-cols-8 gap-0.5 h-3 items-center">
-            {Array.from({ length: 16 }).map((_, i) => (
-              <div
-                key={i}
-                className="h-1.5 rounded-full"
-                style={{
-                  backgroundColor: accentColor,
-                  opacity: i % 3 === 0 ? 0.9 : 0.4,
-                  height: `${(i % 4 + 1) * 20}%`,
-                }}
-              />
-            ))}
+
+          {/* Genuine miniature piano roll note previews */}
+          <div className="relative flex-1 w-full my-0.5 overflow-hidden">
+            {hasNotes ? (
+              region.notes.map((note) => {
+                const leftPct = (note.startTick / totalRegionTicks) * 100;
+                const widthPct = Math.max(1, (note.durationTicks / totalRegionTicks) * 100);
+                // Pitch range 24 (C1) to 84 (C6), span = 60
+                const pitchNorm = Math.min(1, Math.max(0, (note.pitch - 24) / 60));
+                const bottomPct = pitchNorm * 75 + 10;
+
+                return (
+                  <div
+                    key={note.id}
+                    className="absolute h-1 rounded-[1px] pointer-events-none transition-all"
+                    style={{
+                      left: `${leftPct}%`,
+                      width: `${widthPct}%`,
+                      bottom: `${bottomPct}%`,
+                      backgroundColor: accentColor,
+                      opacity: Math.max(0.4, note.velocity / 127),
+                    }}
+                  />
+                );
+              })
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-[7px] text-[#555555] italic">
+                (empty)
+              </div>
+            )}
           </div>
         </div>
       );
@@ -113,16 +136,16 @@ export const TrackTimeline: React.FC<TrackTimelineProps> = ({
             style={{
               left: `${leftPx}px`,
               width: `${widthPx}px`,
-              borderColor: track.muted ? '#333333' : accentColor,
+              borderColor: isSelected ? '#FFFFFF' : track.muted ? '#333333' : accentColor,
               backgroundColor: track.muted ? '#121212' : `${accentColor}1A`, // 10% opacity background fill
-              boxShadow: isSelected ? `0 0 10px ${accentColor}` : 'none',
+              boxShadow: isSelected ? `0 0 10px #FFFFFF` : 'none',
               color: track.muted ? '#555555' : accentColor,
             }}
           >
             {/* Top Region Accent Header Strip */}
             <div
               className="h-1 w-full rounded-t-sm"
-              style={{ backgroundColor: accentColor }}
+              style={{ backgroundColor: isSelected ? '#FFFFFF' : accentColor }}
             />
             {renderClipContent(region)}
           </div>

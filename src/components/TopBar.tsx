@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Play, Pause, Square, Circle, RotateCcw, Settings, Music, Disc } from 'lucide-react';
+import { Play, Pause, Square, Circle, RotateCcw, Settings, Music, Disc, Save } from 'lucide-react';
 import {
   ProjectState,
   ViewMode,
@@ -10,6 +10,8 @@ import {
 
 interface TopBarProps {
   project: ProjectState;
+  hasUnsavedChanges?: boolean;
+  onSaveProject?: () => void;
   onUpdateProjectName: (name: string) => void;
   onTogglePlay: () => void;
   onToggleRecord: () => void;
@@ -24,6 +26,8 @@ interface TopBarProps {
 
 export const TopBar: React.FC<TopBarProps> = ({
   project,
+  hasUnsavedChanges = false,
+  onSaveProject,
   onUpdateProjectName,
   onTogglePlay,
   onToggleRecord,
@@ -75,16 +79,29 @@ export const TopBar: React.FC<TopBarProps> = ({
               className="bg-black text-white px-1.5 py-0.5 text-xs font-mono rounded border border-[#222222] focus:outline-none focus:border-[#00E5FF] w-full"
             />
           ) : (
-            <button
-              onClick={() => setIsEditingName(true)}
-              className="text-xs font-semibold text-left truncate hover:text-[#00E5FF] transition-colors"
-              title="Click to rename project"
-            >
-              {name}
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setIsEditingName(true)}
+                className="text-xs font-semibold text-left truncate hover:text-[#00E5FF] transition-colors"
+                title="Click to rename project"
+              >
+                {name}
+              </button>
+              {hasUnsavedChanges && (
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-[#FF9500] shrink-0 animate-pulse"
+                  title="Unsaved changes in project"
+                />
+              )}
+            </div>
           )}
-          <span className="text-[10px] text-[#555555] font-mono leading-none">
-            DEBIAN AUDIO ENGINE
+          <span className="text-[10px] text-[#555555] font-mono leading-none flex items-center gap-1">
+            <span>DEBIAN AUDIO ENGINE</span>
+            {hasUnsavedChanges ? (
+              <span className="text-[#FF9500] text-[9px] font-bold">• UNSAVED</span>
+            ) : (
+              <span className="text-[#00FF41] text-[9px] font-bold">• SAVED</span>
+            )}
           </span>
         </div>
       </div>
@@ -170,8 +187,22 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
       </div>
 
-      {/* Right: Metronome & Project Menu */}
+      {/* Right: Save, Metronome & Project Menu */}
       <div className="flex items-center gap-1.5">
+        {onSaveProject && (
+          <button
+            onClick={onSaveProject}
+            className={`w-8 h-8 rounded border flex items-center justify-center transition-all ${
+              hasUnsavedChanges
+                ? 'bg-[#00FF41]/10 border-[#00FF41] text-[#00FF41] hover:bg-[#00FF41]/20 shadow-[0_0_8px_rgba(0,255,65,0.3)]'
+                : 'bg-black border-[#222222] text-[#666666] hover:text-white'
+            }`}
+            title={hasUnsavedChanges ? 'Save Project File (.dawproj) - You have unsaved changes' : 'Save Project File (.dawproj)'}
+          >
+            <Save className="w-3.5 h-3.5" />
+          </button>
+        )}
+
         <button
           onClick={onToggleMetronome}
           className={`px-2 py-1.5 rounded text-xs font-mono flex items-center gap-1 border transition-all ${

@@ -12,6 +12,7 @@ interface TrackListProps {
   onVolumeChange: (id: string, vol: number) => void;
   onPanChange: (id: string, pan: number) => void;
   onSelectTrack: (id: string) => void;
+  onSelectRegion?: (trackId: string, regionId: string) => void;
   onReorderTrack?: (id: string, direction: 'up' | 'down') => void;
   onDeleteTrack?: (id: string) => void;
   onAddTrack?: () => void;
@@ -25,6 +26,7 @@ export const TrackList: React.FC<TrackListProps> = ({
   onToggleArm,
   onVolumeChange,
   onSelectTrack,
+  onSelectRegion,
   onReorderTrack,
   onDeleteTrack,
   onAddTrack,
@@ -32,6 +34,7 @@ export const TrackList: React.FC<TrackListProps> = ({
   const {
     tracks,
     selectedTrackId,
+    selectedRegionId,
     transport,
     sectionMarkers,
     totalBars,
@@ -42,7 +45,6 @@ export const TrackList: React.FC<TrackListProps> = ({
 
   const [barWidthPx, setBarWidthPx] = useState(64); // default 64px per bar
   const [snapGrid, setSnapGrid] = useState('1/1');
-  const [selectedRegionId, setSelectedRegionId] = useState<string | undefined>();
 
   const timelineContainerRef = useRef<HTMLDivElement>(null);
 
@@ -175,8 +177,8 @@ export const TrackList: React.FC<TrackListProps> = ({
       <div className="flex-1 overflow-auto flex relative" ref={timelineContainerRef}>
         {/* Track Headers Column (Sticky Left) */}
         <div className="w-[240px] sm:w-[320px] shrink-0 sticky left-0 z-30 bg-[#121212] border-r border-[#222222] shadow-[4px_0_12px_rgba(0,0,0,0.6)]">
-          {/* Header Corner Box */}
-          <div className="h-9 bg-[#121212] border-b border-[#222222] px-3 flex items-center justify-between text-[10px] font-mono text-[#555555]">
+          {/* Header Corner Box (Fixed at top-left corner in both scroll axes) */}
+          <div className="h-9 bg-[#121212] border-b border-[#222222] px-3 flex items-center justify-between text-[10px] font-mono text-[#555555] sticky top-0 z-40">
             <span>TRACK / INSTRUMENT</span>
             <span className="flex items-center gap-3">
               <span>M S REC</span>
@@ -283,7 +285,7 @@ export const TrackList: React.FC<TrackListProps> = ({
                 onToggleArm={onToggleArm}
                 onVolumeChange={onVolumeChange}
                 onSelectTrack={onSelectTrack}
-                onSelectRegion={(_tId, rId) => setSelectedRegionId(rId)}
+                onSelectRegion={onSelectRegion}
                 selectedRegionId={selectedRegionId}
                 renderMode="timeline"
               />
